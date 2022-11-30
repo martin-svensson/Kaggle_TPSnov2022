@@ -1,0 +1,114 @@
+---
+title: "EDA"
+format: html
+editor: visual
+---
+
+## Setup
+
+```{r setup}
+#| output: false
+
+library(data.table)
+library(tidyverse)
+library(magrittr)
+library(here)
+library(umap)
+
+```
+
+```{r load_data}
+#| cache: true
+#| include: false
+
+load(here("Output/1_mat_train.RData"))
+load(here("Output/1_index.RData"))
+
+df_train_labels <- 
+  fread(here("Data/train_labels.csv"))
+
+```
+
+```{r fun_and_vars}
+
+log_loss <- function(y_true, y_pred) {
+  
+  -1 * mean(y_true * log(y_pred) + (1 - y_true) * log(1 - y_pred))
+  
+}
+
+ll_row <- nrow(mat_train)
+id_col <- 1
+
+```
+
+
+## Idenitfying poor predictions
+
+Firstly, we will idenitfy any predictions with 0 or 1 since they are erronous (or will at least lead to poor performance .. )
+
+```{r}
+
+bad_index <- 
+  map_lgl(
+    2:ncol(mat_train),
+    ~ ((min(mat_train[index$training , .x]) < 1/10000) | (max(mat_train[index$training , .x]) > 1 - 1/10000))
+  )
+
+```
+
+The data is high dimensional (we essentially have 5000 features) so the first step is to reduce it. Lets look at the logloss scores to see if we can exclude some from the ensemble upfront
+
+```{r}
+#| warning: false
+
+ll_training <- 
+  map_dbl(
+    2:ncol(mat_train),
+    ~ log_loss(
+        df_train_labels[index$training, label],
+        mat_train[index$training, .x]
+      )
+  )
+
+ll_training %>% 
+  summary
+
+```
+
+Note: all the NA's are due to predictions being too close to 0 or 1 (the bad index ...). We might just remove all predictions with log loss larger than first quantile. 
+
+## Dimensionality reduction
+
+From: https://www.kaggle.com/code/lucasmorin/tps-nov-2022-umap-model-embedding
+Vignette: https://cran.r-project.org/web/packages/umap/vignettes/umap.html
+
+```{r}
+#| cache: true
+
+# umap_train <- 
+#   mat_train[index$training, c(FALSE, !bad_index)] %>% 
+#   umap(method = "naive")
+
+```
+
+Takes way too long ...
+
+
+## Check performance of simple mean
+
+Let's check how a simple mean ensemble of the 10 best performing prediction sets performs
+
+```{r}
+
+ens_avg <-  
+  mat_train[
+    index$validation, 
+    which(ll_training < sort(ll_training)[11]) + 1
+  ] %>% rowMeans()
+
+log_loss(df_train_labels[index$validation, label], ens_avg)
+
+```
+
+Thats an improvement. 

@@ -43,6 +43,16 @@ id_col <- 1
 ```
 
 
+## Is the classification problem balanced?
+
+```{r}
+
+df_train_labels %>% 
+  count(label)
+
+```
+
+
 ## Idenitfying poor predictions
 
 Firstly, we will idenitfy any predictions with 0 or 1 since they are erronous (or will at least lead to poor performance .. )

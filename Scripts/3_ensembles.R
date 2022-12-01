@@ -64,10 +64,12 @@ ll_training <-
 
 excl_threshold <- 
   ll_training %>% 
-  quantile(0.05, na.rm = TRUE)
+  quantile(0.25, na.rm = TRUE)
 
 idx_incl <- 
   which(ll_training < excl_threshold) + 1
+
+
 
 
 
@@ -83,6 +85,20 @@ df_train$label <-
   df_train_labels[ , label] %>% 
   as.factor()
 
+# -- ensemble member selection / feature selection using ROC auc
+
+auc_training <- 
+  map_dbl(
+    setdiff(names(df_train), "label"),
+    ~ roc_auc(
+        df_train,
+        !!.x,
+        truth = label
+      ) %>% pull(.estimate)
+  )
+# They are all absolutely terrible
+
+
 # -- Recipes
 
 recipe_raw <- 
@@ -90,6 +106,29 @@ recipe_raw <-
     label ~ .,
     df_train
   ) 
+
+recipe_trans <- 
+  recipe_raw %>% 
+  step_hyperbolic(
+    func = "sinh",
+    all_predictors()
+  )
+
+recipe_pca <- 
+  recipe_raw %>% 
+  step_pca(
+    num_comp = 10,
+    all_predictors()
+  )
+
+# test <- 
+#   recipe_pca %>% 
+#   prep() %>% 
+#   bake(new_data = NULL)
+# 
+# test %>% 
+#   ggplot(aes(x = PC1, y = PC2, color = label)) + 
+#   geom_point()
 
 # -- Models
 
@@ -99,13 +138,25 @@ mod_xgb <-
   ) %>% 
   set_engine("xgboost")
 
+mod_lr <- 
+  logistic_reg(
+    penalty = 0.2,
+    mixture = 0.5
+  ) %>% 
+  set_engine("glm")
+
+
 # -- Workflows
 
 wflow_xgb <- 
   workflow() %>% 
   add_model(mod_xgb) %>% 
-  add_recipe(recipe_raw) 
+  add_recipe(recipe_pca) 
   
+wflow_lr <- 
+  workflow() %>% 
+  add_model(mod_lr) %>% 
+  add_recipe(recipe_raw)
 
 
 # ---- Validation --------------------------------------------------------------
@@ -133,8 +184,7 @@ log_loss(
 )
 # thats so bad
 
-
-# simple mean
+# -- simple mean
 
 log_loss(
   df_train[index$validation, label] %>% 
@@ -145,6 +195,27 @@ log_loss(
 )
 #thats even worse .. 
 
+# -- lr
+
+fit_lr <- 
+  fit(
+    wflow_lm,
+    df_train[index$training, ]
+  )
+
+val_lr <- 
+  predict(
+    fit_lr,
+    df_train[index$validation, ],
+    type = "prob"
+  )
+
+log_loss(
+  df_train[index$validation, label] %>% 
+    as.character() %>% 
+    as.integer(),
+  val_lr$.pred_1
+)
 
 
 # ---- Submissions -------------------------------------------------------------
@@ -154,6 +225,8 @@ df_test <-
     -c(index$training, index$validation, index$test, ll_row), 
     setdiff(idx_incl, idx_bad)
   ] %>% as.data.table()
+
+# -- xgb
 
 fit_xgb_final <- 
   fit(
@@ -169,6 +242,27 @@ submission <-
 submission$pred <-  
   predict(
     fit_xgb_final,
+    df_test,
+    type = "prob"
+  ) %>% 
+  pull(.pred_1)
+
+# -- lr
+
+fit_lr_final <- 
+  fit(
+    wflow_lr, 
+    df_train
+  )
+
+submission <- 
+  data.table(
+    "id" = mat_train[-c(index$training, index$validation, index$test, ll_row), 1]
+  )
+
+submission$pred <-  
+  predict(
+    fit_lr_final,
     df_test,
     type = "prob"
   ) %>% 

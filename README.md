@@ -4,6 +4,9 @@ The purpose of entering this competition is to familiarize myself with Kaggle, G
 
 # Learning
 
+## Notebooks
+
+- Great EDA: https://www.kaggle.com/code/ambrosm/tpsnov22-eda-which-makes-sense
 
 # Data
 
